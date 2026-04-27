@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 const company = {
   name: "Fit Slim",
@@ -705,7 +705,7 @@ function WebPage({ setActive }) {
   }
 
   return <main>
-    <section className="relative overflow-hidden bg-slate-950 text-white"><img src={img.hero} alt="Fit Slim jídlo" className="absolute inset-0 h-full w-full object-cover opacity-25" /><div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center"><div><Badge tone="dark">{company.claim}</Badge><h1 className="mt-6 text-5xl font-black tracking-tight md:text-7xl">Fit Slim krabičkové menu</h1><p className="mt-6 max-w-2xl text-xl leading-9 text-slate-100">Veřejná stránka pro zákazníky. Administrace je zvlášť pod heslem admin, provozní část pod heslem sklad.</p><div className="mt-8 flex flex-wrap gap-3"><Button onClick={() => setActive("customer")}>Objednat menu</Button><a href={`tel:${company.phoneRaw}`} className="rounded-2xl bg-white px-5 py-3 font-black text-slate-950 hover:bg-slate-100">Zavolat {company.phone}</a></div></div><Card className="border-white/20 bg-white/10 p-6 text-white backdrop-blur"><img src={img.logo} alt="Fit Slim" className="mb-6 max-h-20 rounded-2xl bg-white p-3" /><p><b>Objednávky:</b> {company.phone}</p><p className="mt-2"><b>E-mail:</b> {company.email}</p><p className="mt-2"><b>Rozvoz:</b> {company.delivery}</p></Card></div></section>
+    <section className="relative overflow-hidden bg-slate-950 text-white"><img src={img.hero} alt="Fit Slim jídlo" className="absolute inset-0 h-full w-full object-cover opacity-25" /><div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center"><div><Badge tone="dark">{company.claim}</Badge><h1 className="mt-6 text-5xl font-black tracking-tight md:text-7xl">Denní menu U Jakuba</h1><p className="mt-6 max-w-2xl text-xl leading-9 text-slate-100">Moderní hlavní stránka pro výběr denního menu, objednávku krabičkové diety a přístup do administrace. Web má nastavený název stránky, manifest a barvu aplikace.</p><div className="mt-8 flex flex-wrap gap-3"><Button onClick={() => setActive("customer")}>Objednat menu</Button><a href={`tel:${company.phoneRaw}`} className="rounded-2xl bg-white px-5 py-3 font-black text-slate-950 hover:bg-slate-100">Zavolat {company.phone}</a></div></div><Card className="border-white/20 bg-white/10 p-6 text-white backdrop-blur"><img src={img.logo} alt="Fit Slim" className="mb-6 max-h-20 rounded-2xl bg-white p-3" /><p><b>Objednávky:</b> {company.phone}</p><p className="mt-2"><b>E-mail:</b> {company.email}</p><p className="mt-2"><b>Rozvoz:</b> {company.delivery}</p><div className="mt-5 rounded-2xl bg-slate-950/70 p-4 text-sm text-slate-100"><p className="font-black">Denní menu U Jakuba</p><p className="mt-1 text-slate-300">Manifest: /manifest.json</p><p className="text-slate-300">Theme color: #111111</p></div></Card></div></section>
 
     <section className="mx-auto max-w-7xl px-4 py-14"><div className="grid gap-5 md:grid-cols-3">{plans.slice(0, 3).map((p) => <Card key={p.id} className="overflow-hidden"><img src={p.image} alt={p.name} className="h-52 w-full object-cover" /><div className="p-6"><h3 className="text-2xl font-black">{p.name}</h3><p className="mt-2 text-slate-600">{p.kcal} kcal · {p.meals} jídel denně</p><p className="mt-4 text-3xl font-black">{money(p.price)} / den</p></div></Card>)}</div></section>
 
@@ -1297,5 +1297,26 @@ export default function App() {
   const [adminLogged, setAdminLogged] = useState(false);
   const [workerLogged, setWorkerLogged] = useState(false);
   const { show, Notice } = useNotice();
+
+  useEffect(() => {
+    document.title = "Denní menu U Jakuba";
+
+    let manifest = document.querySelector('link[rel="manifest"]');
+    if (!manifest) {
+      manifest = document.createElement("link");
+      manifest.setAttribute("rel", "manifest");
+      document.head.appendChild(manifest);
+    }
+    manifest.setAttribute("href", "/manifest.json");
+
+    let theme = document.querySelector('meta[name="theme-color"]');
+    if (!theme) {
+      theme = document.createElement("meta");
+      theme.setAttribute("name", "theme-color");
+      document.head.appendChild(theme);
+    }
+    theme.setAttribute("content", "#111111");
+  }, []);
+
   return <div className="min-h-screen bg-slate-50 text-slate-950"><AppNav active={active} setActive={setActive} />{active === "web" && <WebPage setActive={setActive} />}{active === "customer" && <CustomerPage orders={orders} setOrders={setOrders} customers={customers} setCustomers={setCustomers} show={show} />}{active === "admin" && (adminLogged ? <AdminPortal orders={orders} setOrders={setOrders} customers={customers} show={show} /> : <LoginGate title="Administrace" password="admin" onLogin={() => setAdminLogged(true)} />)}{active === "worker" && (workerLogged ? <WorkerPortal orders={orders} setOrders={setOrders} show={show} /> : <LoginGate title="Výroba / sklad / rozvoz" password="sklad" onLogin={() => setWorkerLogged(true)} />)}<footer className="mt-12 bg-slate-950 px-4 py-10 text-white"><div className="mx-auto grid max-w-7xl gap-6 md:grid-cols-4"><div><h3 className="text-2xl font-black">{company.name}</h3><p className="mt-2 text-slate-300">{company.claim}</p></div><div><b>Kontakt</b><p className="mt-2 text-slate-300">{company.phone}<br />{company.email}</p></div><div><b>Adresa</b><p className="mt-2 text-slate-300">{company.address}<br />IČO: {company.ico}</p></div><div><b>Vstupy</b><p className="mt-2 text-slate-300">Administrace: admin<br />Výroba/sklad/rozvoz: sklad</p></div></div></footer><Notice /></div>;
 }
