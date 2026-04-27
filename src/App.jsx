@@ -678,8 +678,274 @@ function printInvoices(orders) { openPrintable("Faktury", orders.map((o, i) => `
 function exportDelivery(orders) { downloadCsv("fit-slim-rozvoz.csv", ["Pořadí", "Zákazník", "Telefon", "Adresa", "Trasa", "Řidič", "Poznámka", "Stav"], orders.map((o, i) => [i + 1, o.customer, o.phone, o.address, o.route, o.driver, o.driverNote, o.status])); }
 function printDelivery(orders) { openPrintable("Rozvoz", `<h1>Fit Slim – rozvozový list</h1><table><thead><tr>${["Pořadí", "Zákazník", "Telefon", "Adresa", "Trasa", "Řidič", "Poznámka", "Stav"].map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${orders.map((o, i) => `<tr><td>${i + 1}</td><td>${o.customer}</td><td>${o.phone}</td><td>${o.address}</td><td>${o.route}</td><td>${o.driver}</td><td>${o.driverNote}</td><td>${o.status}</td></tr>`).join("")}</tbody></table>`); }
 
+const gymReservationDefaultState = {
+  activeDate: "2026-04-27",
+  adminUnlocked: false,
+  mode: "user",
+  trainers: [
+    { id: 1, name: "Jakub Horáček", specialty: "Kondice, redukce a silový základ", capacity: 12, phone: "+420 778 533 298" },
+    { id: 2, name: "Jitka Papežová", specialty: "Funkční trénink a mobilita", capacity: 10, phone: "+420 777 333 444" },
+    { id: 3, name: "Roman Cirovátka", specialty: "HIIT, kruhový trénink a výdrž", capacity: 10, phone: "+420 777 555 666" },
+  ],
+  users: [
+    { id: 1, name: "Jakub", email: "jakub@email.cz", phone: "+420 777 100 100", role: "client", active: true },
+    { id: 2, name: "Aneta", email: "aneta@email.cz", phone: "+420 777 200 200", role: "client", active: true },
+    { id: 3, name: "Míra", email: "mira@email.cz", phone: "+420 777 300 300", role: "client", active: true },
+    { id: 4, name: "Admin", email: "admin@fitrezervace.cz", phone: "+420 777 999 999", role: "admin", active: true },
+  ],
+  currentUserId: 1,
+  classes: [
+    { id: 101, date: "2026-04-27", time: "07:00", title: "Ranní síla", trainerId: 1, duration: 60, users: [1] },
+    { id: 102, date: "2026-04-27", time: "17:00", title: "HIIT kruháč", trainerId: 3, duration: 45, users: [2, 3] },
+    { id: 103, date: "2026-04-28", time: "18:00", title: "Funkční trénink", trainerId: 2, duration: 60, users: [] },
+    { id: 104, date: "2026-04-29", time: "16:30", title: "Technika dřepu", trainerId: 1, duration: 75, users: [] },
+    { id: 105, date: "2026-05-01", time: "09:00", title: "Kondiční kruháč", trainerId: 3, duration: 50, users: [] },
+  ],
+  days: [
+    { label: "Po", date: "2026-04-27" }, { label: "Út", date: "2026-04-28" }, { label: "St", date: "2026-04-29" },
+    { label: "Čt", date: "2026-04-30" }, { label: "Pá", date: "2026-05-01" }, { label: "So", date: "2026-05-02" }, { label: "Ne", date: "2026-05-03" },
+  ],
+};
+
+function GymReservationPage({ show }) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = localStorage.getItem("fitrezervace-data-v1-react");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...gymReservationDefaultState,
+          ...parsed,
+          trainers: gymReservationDefaultState.trainers,
+          selectedTrainerId: 1,
+          classes: (parsed.classes || gymReservationDefaultState.classes).map((item) => ({ ...item, trainerId: item.trainerId === 4 ? 3 : item.trainerId })),
+        };
+      }
+      return JSON.parse(JSON.stringify(gymReservationDefaultState));
+    } catch {
+      return JSON.parse(JSON.stringify(gymReservationDefaultState));
+    }
+  });
+  const [adminPassword, setAdminPassword] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const [newUser, setNewUser] = useState({ name: "", email: "", phone: "" });
+  const [classForm, setClassForm] = useState({ title: "", date: "2026-04-27", time: "18:00", duration: 60, trainerId: 1 });
+  const [trainerForm, setTrainerForm] = useState({ name: "", specialty: "", phone: "", capacity: 8 });
+  const gymHours = ["06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
+  const [selectedHour, setSelectedHour] = useState("18:00");
+  const [selectedTrainerId, setSelectedTrainerId] = useState(1);
+
+  useEffect(() => { localStorage.setItem("fitrezervace-data-v1-react", JSON.stringify(state)); }, [state]);
+
+  const trainers = state.trainers;
+  const clients = state.users.filter((u) => u.role === "client");
+  const currentUser = state.users.find((u) => u.id === Number(state.currentUserId)) || clients[0];
+  const reservations = state.classes.reduce((sum, item) => sum + item.users.length, 0);
+  const freeSlots = state.classes.reduce((sum, item) => {
+    const trainer = trainers.find((t) => t.id === Number(item.trainerId));
+    return sum + Math.max(0, (trainer?.capacity || 0) - item.users.length);
+  }, 0);
+  const visibleUsers = !userSearch.trim() ? state.users : state.users.filter((u) => `${u.name} ${u.email} ${u.phone} ${u.role}`.toLowerCase().includes(userSearch.toLowerCase()));
+  const formatDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "numeric" });
+  const trainerById = (id) => trainers.find((t) => t.id === Number(id));
+  const userById = (id) => state.users.find((u) => u.id === Number(id));
+  const visibleClasses = state.classes.filter((item) => item.date === state.activeDate).sort((a, b) => a.time.localeCompare(b.time));
+  const selectedTrainerForHour = trainers.find((t) => t.id === Number(selectedTrainerId)) || trainers[0];
+  const selectedHourClass = state.classes.find((item) => item.date === state.activeDate && item.time === selectedHour && item.trainerId === Number(selectedTrainerId));
+  const selectedHourUsers = selectedHourClass ? selectedHourClass.users.map((id) => userById(id)).filter(Boolean) : [];
+  const selectedHourCapacity = selectedTrainerForHour?.capacity || 0;
+  const selectedHourFree = selectedHourCapacity ? Math.max(0, selectedHourCapacity - selectedHourUsers.length) : 0;
+  const hourSlots = gymHours.map((hour) => {
+    const classes = state.classes.filter((item) => item.date === state.activeDate && item.time === hour);
+    const reservations = classes.reduce((sum, item) => sum + item.users.length, 0);
+    const capacity = classes.reduce((sum, item) => sum + (trainerById(item.trainerId)?.capacity || 0), 0);
+    const people = classes.flatMap((item) => item.users.map((id) => userById(id)?.name).filter(Boolean));
+    return { hour, classes, reservations, capacity, people, free: capacity ? Math.max(0, capacity - reservations) : null };
+  });
+
+  function setMode(mode) {
+    setState((prev) => ({ ...prev, mode: mode === "admin" && !prev.adminUnlocked ? "login" : mode }));
+  }
+
+  function unlockAdmin() {
+    if (adminPassword === "admin123") {
+      setState((prev) => ({ ...prev, adminUnlocked: true, mode: "admin" }));
+      setAdminPassword("");
+      show("Administrace posilovny odemčena.");
+    } else {
+      show("Špatné heslo. Demo heslo je admin123.");
+    }
+  }
+
+  function registerClient() {
+    if (!newUser.name.trim() || !newUser.email.trim()) { show("Vyplň jméno a e-mail klienta."); return; }
+    const id = Date.now();
+    setState((prev) => ({ ...prev, currentUserId: id, users: [{ id, name: newUser.name.trim(), email: newUser.email.trim(), phone: newUser.phone.trim(), role: "client", active: true }, ...prev.users] }));
+    setNewUser({ name: "", email: "", phone: "" });
+    show("Klient byl registrován.");
+  }
+
+  function toggleReservation(classId) {
+    if (!currentUser?.active) { show("Účet je blokovaný."); return; }
+    setState((prev) => ({
+      ...prev,
+      classes: prev.classes.map((item) => {
+        if (item.id !== classId) return item;
+        const trainer = prev.trainers.find((t) => t.id === item.trainerId);
+        const alreadyIn = item.users.includes(currentUser.id);
+        if (!alreadyIn && item.users.length >= (trainer?.capacity || 0)) return item;
+        return { ...item, users: alreadyIn ? item.users.filter((id) => id !== currentUser.id) : [...item.users, currentUser.id] };
+      }),
+    }));
+  }
+
+  function reserveSelectedHour() {
+    if (!currentUser?.active) { show("Účet je blokovaný."); return; }
+    const trainer = trainers.find((t) => t.id === Number(selectedTrainerId));
+    if (!trainer) { show("Vyber trenéra."); return; }
+    const existing = state.classes.find((item) => item.date === state.activeDate && item.time === selectedHour && item.trainerId === trainer.id);
+    if (existing) {
+      if (existing.users.includes(currentUser.id)) { show("Na tuto hodinu už jsi přihlášený."); return; }
+      if (existing.users.length >= trainer.capacity) { show("Tato hodina je plná. Vyber jiný čas nebo trenéra."); return; }
+      setState((prev) => ({ ...prev, classes: prev.classes.map((item) => item.id === existing.id ? { ...item, users: [...item.users, currentUser.id] } : item) }));
+      show(`Rezervováno: ${selectedHour}, ${trainer.name}.`);
+      return;
+    }
+    const id = Date.now();
+    setState((prev) => ({
+      ...prev,
+      classes: [{ id, date: prev.activeDate, time: selectedHour, title: "Volné cvičení", trainerId: trainer.id, duration: 60, users: [currentUser.id] }, ...prev.classes],
+    }));
+    show(`Vytvořena a rezervována hodina ${selectedHour} jako Volné cvičení.`);
+  }
+
+  function addClass() {
+    if (!classForm.title.trim()) { show("Vyplň název lekce."); return; }
+    const id = Date.now();
+    setState((prev) => ({ ...prev, activeDate: classForm.date, classes: [{ id, title: classForm.title.trim(), date: classForm.date, time: classForm.time, duration: Number(classForm.duration || 60), trainerId: Number(classForm.trainerId), users: [] }, ...prev.classes] }));
+    setClassForm({ ...classForm, title: "" });
+    show("Lekce byla přidána.");
+  }
+
+  function addTrainer() {
+    if (!trainerForm.name.trim() || !trainerForm.specialty.trim()) { show("Vyplň jméno trenéra a specializaci."); return; }
+    const id = Date.now();
+    setState((prev) => ({ ...prev, trainers: [...prev.trainers, { id, name: trainerForm.name.trim(), specialty: trainerForm.specialty.trim(), phone: trainerForm.phone.trim(), capacity: Number(trainerForm.capacity || 8) }] }));
+    setTrainerForm({ name: "", specialty: "", phone: "", capacity: 8 });
+    show("Trenér byl uložen.");
+  }
+
+  function toggleUser(id) {
+    setState((prev) => ({ ...prev, users: prev.users.map((u) => u.id === id ? { ...u, active: !u.active } : u) }));
+  }
+
+  function deleteClass(id) {
+    setState((prev) => ({ ...prev, classes: prev.classes.filter((item) => item.id !== id) }));
+  }
+
+  function removeReservation(classId, userId) {
+    setState((prev) => ({ ...prev, classes: prev.classes.map((item) => item.id === classId ? { ...item, users: item.users.filter((id) => id !== userId) } : item) }));
+  }
+
+  return <main className="mx-auto max-w-7xl px-4 py-10">
+    <PageHead badge="Rezervace posilovny" title="FitRezervace" text="Rezervační systém ve stejném stylu jako zbytek aplikace: registrace klienta, výběr dne a hodiny, trenéři, obsazenost a administrace lekcí." />
+
+    <Card className="mb-6 overflow-hidden border-emerald-100 bg-gradient-to-br from-white via-emerald-50 to-slate-50 p-6">
+      <div className="grid gap-6 lg:grid-cols-[1fr_420px] lg:items-center">
+        <div>
+          <div className="flex flex-wrap gap-2"><Badge tone="green">Posilovna</Badge><Badge tone="dark">Rezervace hodin</Badge></div>
+          <h2 className="mt-4 text-4xl font-black tracking-tight md:text-6xl">Vyber si čas cvičení</h2>
+          <p className="mt-4 max-w-3xl text-lg leading-8 text-slate-600">Klient vidí volné hodiny, obsazenost, trenéra a lidi přihlášené na konkrétní čas. Admin může přidávat lekce, trenéry a spravovat uživatele.</p>
+        </div>
+        <Card className="border-slate-200 bg-white/90 p-4 shadow-sm">
+          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-2">
+            <button onClick={() => setMode("user")} className={cls("rounded-xl px-4 py-3 font-black", state.mode === "user" ? "bg-emerald-600 text-white" : "text-slate-700 hover:bg-white")}>Uživatel</button>
+            <button onClick={() => setMode("admin")} className={cls("rounded-xl px-4 py-3 font-black", state.mode === "admin" || state.mode === "login" ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-white")}>Admin</button>
+          </div>
+          {state.mode === "login" && !state.adminUnlocked && <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><Input value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") unlockAdmin(); }} type="password" placeholder="Admin heslo: admin123" /><Button onClick={unlockAdmin}>Odemknout</Button></div>}
+          <p className="mt-3 text-sm text-slate-500">Demo heslo administrátora: <b>admin123</b></p>
+        </Card>
+      </div>
+    </Card>
+
+    <div className="grid gap-4 md:grid-cols-5">
+      <Stat title="Klienti" value={clients.length} sub="registrovaní" />
+      <Stat title="Trenéři" value={trainers.length} sub="aktivní" />
+      <Stat title="Lekce" value={state.classes.length} sub="v systému" />
+      <Stat title="Rezervace" value={reservations} sub="celkem" />
+      <Stat title="Volná místa" value={freeSlots} sub="napříč lekcemi" />
+    </div>
+
+    <div className="mt-6 grid gap-6 lg:grid-cols-[380px_1fr]">
+      <aside className="grid gap-5 self-start">
+        <Card className="p-6">
+          <h2 className="text-2xl font-black">Registrace klienta</h2>
+          <p className="mt-2 text-sm text-slate-500">Přidej nového klienta a hned ho vyber jako přihlášeného.</p>
+          <div className="mt-5 grid gap-3">
+            <Input value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} placeholder="Jméno a příjmení" />
+            <Input value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} placeholder="E-mail" />
+            <Input value={newUser.phone} onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })} placeholder="Telefon" />
+            <Button onClick={registerClient}>Registrovat klienta</Button>
+            <label className="mt-2 text-sm font-bold text-slate-500">Přihlášený klient</label>
+            <Select value={state.currentUserId} onChange={(e) => setState((prev) => ({ ...prev, currentUserId: Number(e.target.value) }))}>{clients.map((u) => <option key={u.id} value={u.id}>{u.name}{!u.active ? " — blokovaný" : ""}</option>)}</Select>
+          </div>
+        </Card>
+
+        <Card className="p-6 ring-1 ring-emerald-100">
+          <h2 className="text-2xl font-black">Výběr hodiny cvičení</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Vyber den, hodinu a trenéra. Systém ukáže, kdo už tam bude a jestli je volno.</p>
+          <div className="mt-5 grid gap-3">
+            <Select value={selectedHour} onChange={(e) => setSelectedHour(e.target.value)}>{gymHours.map((hour) => <option key={hour} value={hour}>{hour}</option>)}</Select>
+            <Select value={selectedTrainerId} onChange={(e) => setSelectedTrainerId(Number(e.target.value))}>{trainers.map((trainer) => <option key={trainer.id} value={trainer.id}>{trainer.name}</option>)}</Select>
+            <div className={cls("rounded-3xl border p-5", selectedHourClass ? selectedHourFree > 0 ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50" : "border-slate-200 bg-slate-50")}>
+              <div className="flex flex-wrap items-center justify-between gap-2"><b className="text-xl">{selectedHour}</b><Badge tone={selectedHourClass ? selectedHourFree > 0 ? "green" : "red" : "green"}>{selectedHourClass ? selectedHourFree > 0 ? "volno" : "plno" : "volná hodina"}</Badge></div>
+              <p className="mt-1 text-sm font-bold text-slate-700">{selectedTrainerForHour?.name}</p>
+              <p className="mt-2 text-sm text-slate-600">{selectedHourClass ? `${selectedHourUsers.length}/${selectedHourCapacity} obsazeno · volno ${selectedHourFree}` : "Na tuto hodinu zatím nikdo není. Vytvoří se Volné cvičení."}</p>
+              <div className="mt-3 flex flex-wrap gap-2">{selectedHourUsers.length ? selectedHourUsers.map((user) => <span key={user.id} className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-700 shadow-sm">{user.name}</span>) : <Badge tone="green">VOLNO</Badge>}</div>
+            </div>
+            <Button onClick={reserveSelectedHour} disabled={!currentUser?.active || (selectedHourClass && selectedHourFree <= 0 && !selectedHourClass.users.includes(currentUser?.id))}>Rezervovat vybranou hodinu</Button>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-2xl font-black">Kalendář</h2>
+          <div className="mt-4 grid grid-cols-2 gap-2">{state.days.map((day) => <button key={day.date} onClick={() => setState((prev) => ({ ...prev, activeDate: day.date }))} className={cls("rounded-2xl border p-4 text-left transition", state.activeDate === day.date ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-slate-50 hover:bg-white")}><b>{day.label}</b><span className="mt-1 block text-sm opacity-75">{formatDate(day.date)}</span></button>)}</div>
+        </Card>
+
+        <Card className="p-6">
+          <h2 className="text-2xl font-black">Trenéři</h2>
+          <div className="mt-4 grid gap-3">{trainers.map((trainer) => <div key={trainer.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4"><div className="flex items-start justify-between gap-2"><b>{trainer.name}</b><Badge tone="blue">{trainer.capacity} osob</Badge></div><p className="mt-1 text-sm text-slate-500">{trainer.specialty}</p><p className="mt-2 text-xs font-bold text-emerald-700">{trainer.phone}</p></div>)}</div>
+        </Card>
+      </aside>
+
+      <section className="grid gap-5">
+        {state.mode === "admin" && state.adminUnlocked && <div className="grid gap-5">
+          <Card className="p-6">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><Badge tone="dark">Admin</Badge><h2 className="mt-2 text-2xl font-black">Administrace lekcí</h2></div><button onClick={addClass} className="rounded-2xl bg-emerald-600 px-5 py-3 font-black text-white hover:bg-emerald-700">+ Přidat lekci</button></div>
+            <div className="grid gap-3 md:grid-cols-5"><Input value={classForm.title} onChange={(e) => setClassForm({ ...classForm, title: e.target.value })} placeholder="Název lekce" /><Input value={classForm.date} onChange={(e) => setClassForm({ ...classForm, date: e.target.value })} type="date" /><Input value={classForm.time} onChange={(e) => setClassForm({ ...classForm, time: e.target.value })} type="time" /><Input value={classForm.duration} onChange={(e) => setClassForm({ ...classForm, duration: e.target.value })} type="number" min="15" step="15" /><Select value={classForm.trainerId} onChange={(e) => setClassForm({ ...classForm, trainerId: Number(e.target.value) })}>{trainers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></div>
+          </Card>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <Card className="p-6"><h2 className="text-2xl font-black">Přidat trenéra</h2><div className="mt-4 grid gap-3"><Input value={trainerForm.name} onChange={(e) => setTrainerForm({ ...trainerForm, name: e.target.value })} placeholder="Jméno trenéra" /><Input value={trainerForm.specialty} onChange={(e) => setTrainerForm({ ...trainerForm, specialty: e.target.value })} placeholder="Specializace" /><Input value={trainerForm.phone} onChange={(e) => setTrainerForm({ ...trainerForm, phone: e.target.value })} placeholder="Telefon" /><Input value={trainerForm.capacity} onChange={(e) => setTrainerForm({ ...trainerForm, capacity: e.target.value })} type="number" min="1" placeholder="Kapacita" /><Button onClick={addTrainer}>Uložit trenéra</Button></div></Card>
+            <Card className="p-6"><h2 className="text-2xl font-black">Správa uživatelů</h2><Input value={userSearch} onChange={(e) => setUserSearch(e.target.value)} placeholder="Hledat klienta, e-mail, telefon..." className="mt-4 w-full" /><div className="mt-4 grid gap-2">{visibleUsers.map((u) => <div key={u.id} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3"><div><b>{u.name}</b><p className="text-sm text-slate-500">{u.email} · {u.phone || "bez telefonu"}</p></div><button onClick={() => toggleUser(u.id)} className={cls("rounded-xl px-3 py-2 text-sm font-black", u.active ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800")}>{u.active ? "Aktivní" : "Blokovaný"}</button></div>)}</div></Card>
+          </div>
+        </div>}
+
+        <Card className="p-6">
+          <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-end"><div><Badge tone="green">{formatDate(state.activeDate)}</Badge><h2 className="mt-2 text-3xl font-black">Lekce a obsazenost</h2><p className="mt-1 text-slate-600">Přehled hodin dne a seznam vypsaných lekcí.</p></div><div className="rounded-2xl bg-slate-50 px-4 py-3 text-slate-600">Přihlášená: <b className="text-emerald-700">{currentUser?.name || "Nikdo"}</b></div></div>
+
+          <div className="mb-6 rounded-3xl border border-slate-200 bg-slate-50 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-xl font-black">Přehled hodin dne</h3><p className="text-sm text-slate-500">Zeleně volno, žlutě někdo už cvičí, červeně plno.</p></div><Badge tone="dark">{formatDate(state.activeDate)}</Badge></div><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{hourSlots.map((slot) => { const occupied = slot.reservations > 0; const full = slot.capacity > 0 && slot.free === 0; return <button key={slot.hour} onClick={() => setSelectedHour(slot.hour)} className={cls("rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm", selectedHour === slot.hour ? "ring-2 ring-emerald-500" : "", full ? "border-rose-200 bg-rose-50" : occupied ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50")}><b className="text-lg">{slot.hour}</b><p className="mt-1 text-xs text-slate-600">{slot.capacity ? `${slot.reservations}/${slot.capacity} obsazeno · volno ${slot.free}` : "volno / bez lekce"}</p><p className="mt-1 truncate text-xs text-slate-500">{slot.people.length ? slot.people.join(", ") : "Nikdo přihlášený"}</p></button>; })}</div></div>
+
+          {visibleClasses.length === 0 && <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-12 text-center text-slate-500">Na tento den zatím nejsou vypsané žádné lekce.</div>}
+          <div className="grid gap-4 xl:grid-cols-2">{visibleClasses.map((item) => { const trainer = trainerById(item.trainerId) || { name: "Neznámý trenér", specialty: "", capacity: 0 }; const reserved = item.users.includes(currentUser?.id); const full = item.users.length >= trainer.capacity; const pct = trainer.capacity ? Math.min(100, (item.users.length / trainer.capacity) * 100) : 0; return <article key={item.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><Badge tone="blue">{item.time} · {item.duration} min</Badge><h3 className="mt-3 text-2xl font-black">{item.title}</h3><p className="mt-1 text-sm text-slate-500">{trainer.name} · {trainer.specialty}</p></div>{state.mode === "admin" && state.adminUnlocked && <button onClick={() => deleteClass(item.id)} className="rounded-xl bg-rose-100 px-3 py-2 text-sm font-black text-rose-800">Smazat</button>}</div><div className="mt-5 flex justify-between text-sm text-slate-500"><span>Obsazenost</span><span>{item.users.length}/{trainer.capacity}</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${pct}%` }} /></div><div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">{item.users.length === 0 && <p className="text-sm text-slate-500">Zatím nikdo přihlášený</p>}{item.users.map((userId) => { const user = userById(userId); return <div key={userId} className="mb-2 flex items-center justify-between rounded-xl bg-white p-2 last:mb-0"><span>{user?.name || "Neznámý uživatel"}</span>{state.mode === "admin" && state.adminUnlocked && <button onClick={() => removeReservation(item.id, userId)} className="text-sm font-bold text-rose-600">odebrat</button>}</div>; })}</div>{state.mode === "user" ? <button disabled={!currentUser?.active || (!reserved && full)} onClick={() => toggleReservation(item.id)} className={cls("mt-4 w-full rounded-2xl px-5 py-3 font-black", reserved ? "bg-slate-950 text-white" : "bg-emerald-600 text-white hover:bg-emerald-700", (!currentUser?.active || (!reserved && full)) && "opacity-50")}>{!currentUser?.active ? "Účet je blokovaný" : reserved ? "Zrušit rezervaci" : full ? "Lekce je plná" : "Přidat se na lekci"}</button> : <p className="mt-4 text-sm text-slate-500">Admin vidí obsazenost, klienty a může upravit seznam přihlášených.</p>}</article>; })}</div>
+        </Card>
+      </section>
+    </div>
+  </main>;
+}
+
 function AppNav({ active, setActive }) {
-  const items = [["web", "Web pro zákazníky"], ["customer", "Zákaznický účet"], ["worker", "Výroba / sklad / rozvoz"], ["admin", "Administrace"]];
+  const items = [["web", "Web pro zákazníky"], ["customer", "Zákaznický účet"], ["gym", "Rezervace posilovny"], ["worker", "Výroba / sklad / rozvoz"], ["admin", "Administrace"]];
   return <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"><button onClick={() => setActive("web")} className="flex items-center gap-3 text-left"><div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white shadow ring-1 ring-slate-200"><img src={img.logo} alt="Fit Slim" className="h-full w-full object-contain" /></div><div><p className="text-lg font-black">{company.name}</p><p className="text-xs font-bold text-emerald-700">{company.phone}</p></div></button><nav className="flex flex-wrap gap-2">{items.map(([id, label]) => <button key={id} onClick={() => setActive(id)} className={cls("rounded-full px-3 py-2 text-sm font-black", active === id ? "bg-slate-950 text-white" : "hover:bg-slate-100")}>{label}</button>)}</nav></div></header>;
 }
 
@@ -705,7 +971,7 @@ function WebPage({ setActive }) {
   }
 
   return <main>
-    <section className="relative overflow-hidden bg-slate-950 text-white"><img src={img.hero} alt="Fit Slim jídlo" className="absolute inset-0 h-full w-full object-cover opacity-25" /><div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center"><div><Badge tone="dark">{company.claim}</Badge><h1 className="mt-6 text-5xl font-black tracking-tight md:text-7xl">Denní menu U Jakuba</h1><p className="mt-6 max-w-2xl text-xl leading-9 text-slate-100">Moderní hlavní stránka pro výběr denního menu, objednávku krabičkové diety a přístup do administrace. Web má nastavený název stránky, manifest a barvu aplikace.</p><div className="mt-8 flex flex-wrap gap-3"><Button onClick={() => setActive("customer")}>Objednat menu</Button><a href={`tel:${company.phoneRaw}`} className="rounded-2xl bg-white px-5 py-3 font-black text-slate-950 hover:bg-slate-100">Zavolat {company.phone}</a></div></div><Card className="border-white/20 bg-white/10 p-6 text-white backdrop-blur"><img src={img.logo} alt="Fit Slim" className="mb-6 max-h-20 rounded-2xl bg-white p-3" /><p><b>Objednávky:</b> {company.phone}</p><p className="mt-2"><b>E-mail:</b> {company.email}</p><p className="mt-2"><b>Rozvoz:</b> {company.delivery}</p><div className="mt-5 rounded-2xl bg-slate-950/70 p-4 text-sm text-slate-100"><p className="font-black">Denní menu U Jakuba</p><p className="mt-1 text-slate-300">Manifest: /manifest.json</p><p className="text-slate-300">Theme color: #111111</p></div></Card></div></section>
+    <section className="relative overflow-hidden bg-slate-950 text-white"><img src={img.hero} alt="Fit Slim jídlo" className="absolute inset-0 h-full w-full object-cover opacity-25" /><div className="relative mx-auto grid max-w-7xl gap-10 px-4 py-20 lg:grid-cols-[1.15fr_0.85fr] lg:items-center"><div><Badge tone="dark">{company.claim}</Badge><h1 className="mt-6 text-5xl font-black tracking-tight md:text-7xl">Fit Slim krabičkové menu</h1><p className="mt-6 max-w-2xl text-xl leading-9 text-slate-100">Veřejná stránka pro zákazníky. Administrace je zvlášť pod heslem admin, provozní část pod heslem sklad.</p><div className="mt-8 flex flex-wrap gap-3"><Button onClick={() => setActive("customer")}>Objednat menu</Button><a href={`tel:${company.phoneRaw}`} className="rounded-2xl bg-white px-5 py-3 font-black text-slate-950 hover:bg-slate-100">Zavolat {company.phone}</a></div></div><Card className="border-white/20 bg-white/10 p-6 text-white backdrop-blur"><img src={img.logo} alt="Fit Slim" className="mb-6 max-h-20 rounded-2xl bg-white p-3" /><p><b>Objednávky:</b> {company.phone}</p><p className="mt-2"><b>E-mail:</b> {company.email}</p><p className="mt-2"><b>Rozvoz:</b> {company.delivery}</p></Card></div></section>
 
     <section className="mx-auto max-w-7xl px-4 py-14"><div className="grid gap-5 md:grid-cols-3">{plans.slice(0, 3).map((p) => <Card key={p.id} className="overflow-hidden"><img src={p.image} alt={p.name} className="h-52 w-full object-cover" /><div className="p-6"><h3 className="text-2xl font-black">{p.name}</h3><p className="mt-2 text-slate-600">{p.kcal} kcal · {p.meals} jídel denně</p><p className="mt-4 text-3xl font-black">{money(p.price)} / den</p></div></Card>)}</div></section>
 
@@ -1299,7 +1565,7 @@ export default function App() {
   const { show, Notice } = useNotice();
 
   useEffect(() => {
-    document.title = "Denní menu U Jakuba";
+    document.title = "Fit Slim krabičkové menu";
 
     let manifest = document.querySelector('link[rel="manifest"]');
     if (!manifest) {
@@ -1318,5 +1584,5 @@ export default function App() {
     theme.setAttribute("content", "#111111");
   }, []);
 
-  return <div className="min-h-screen bg-slate-50 text-slate-950"><AppNav active={active} setActive={setActive} />{active === "web" && <WebPage setActive={setActive} />}{active === "customer" && <CustomerPage orders={orders} setOrders={setOrders} customers={customers} setCustomers={setCustomers} show={show} />}{active === "admin" && (adminLogged ? <AdminPortal orders={orders} setOrders={setOrders} customers={customers} show={show} /> : <LoginGate title="Administrace" password="admin" onLogin={() => setAdminLogged(true)} />)}{active === "worker" && (workerLogged ? <WorkerPortal orders={orders} setOrders={setOrders} show={show} /> : <LoginGate title="Výroba / sklad / rozvoz" password="sklad" onLogin={() => setWorkerLogged(true)} />)}<footer className="mt-12 bg-slate-950 px-4 py-10 text-white"><div className="mx-auto grid max-w-7xl gap-6 md:grid-cols-4"><div><h3 className="text-2xl font-black">{company.name}</h3><p className="mt-2 text-slate-300">{company.claim}</p></div><div><b>Kontakt</b><p className="mt-2 text-slate-300">{company.phone}<br />{company.email}</p></div><div><b>Adresa</b><p className="mt-2 text-slate-300">{company.address}<br />IČO: {company.ico}</p></div><div><b>Vstupy</b><p className="mt-2 text-slate-300">Administrace: admin<br />Výroba/sklad/rozvoz: sklad</p></div></div></footer><Notice /></div>;
+  return <div className="min-h-screen bg-slate-50 text-slate-950"><AppNav active={active} setActive={setActive} />{active === "web" && <WebPage setActive={setActive} />}{active === "customer" && <CustomerPage orders={orders} setOrders={setOrders} customers={customers} setCustomers={setCustomers} show={show} />}{active === "gym" && <GymReservationPage show={show} />}{active === "admin" && (adminLogged ? <AdminPortal orders={orders} setOrders={setOrders} customers={customers} show={show} /> : <LoginGate title="Administrace" password="admin" onLogin={() => setAdminLogged(true)} />)}{active === "worker" && (workerLogged ? <WorkerPortal orders={orders} setOrders={setOrders} show={show} /> : <LoginGate title="Výroba / sklad / rozvoz" password="sklad" onLogin={() => setWorkerLogged(true)} />)}<footer className="mt-12 bg-slate-950 px-4 py-10 text-white"><div className="mx-auto grid max-w-7xl gap-6 md:grid-cols-4"><div><h3 className="text-2xl font-black">{company.name}</h3><p className="mt-2 text-slate-300">{company.claim}</p></div><div><b>Kontakt</b><p className="mt-2 text-slate-300">{company.phone}<br />{company.email}</p></div><div><b>Adresa</b><p className="mt-2 text-slate-300">{company.address}<br />IČO: {company.ico}</p></div><div><b>Vstupy</b><p className="mt-2 text-slate-300">Administrace: admin<br />Výroba/sklad/rozvoz: sklad</p></div></div></footer><Notice /></div>;
 }
